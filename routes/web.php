@@ -78,6 +78,8 @@ Route::middleware('auth')->group(function () {
             ->name('data-ikm');
         Route::post('/data-ikm/import', [IkmController::class, 'import'])
             ->name('import');
+        Route::post('/data-ikm/manual', [IkmController::class, 'storeManual'])
+            ->name('store-manual');
 
         // Modul 3: Akun Kelurahan — Manajemen & Reset Password
         Route::get('/akun-kelurahan', [IkmController::class, 'akunKelurahan'])

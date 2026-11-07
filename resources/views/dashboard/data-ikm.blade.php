@@ -12,7 +12,7 @@
                 <h3 class="text-sm font-bold text-slate-800">Import Data IKM dari Excel (PTSP)</h3>
                 <p class="text-xs text-slate-400 mt-0.5">
                     Kolom yang diperlukan:
-                    <code class="font-mono text-blue-600 bg-blue-50 px-1 py-0.5 rounded text-[11px]">nib, nama_proyek, nama_perusahaan, alamat_usaha, kelurahan_usaha, judul_kbli</code>
+                    <code class="font-mono text-blue-600 bg-blue-50 px-1 py-0.5 rounded text-[11px]">nib, nama_proyek, nama_perusahaan, alamat_usaha, kelurahan_usaha, kbli, judul_kbli</code>
                 </p>
             </div>
         </div>
@@ -120,12 +120,18 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Kategori Usaha</label>
-                    <select name="kategori" onchange="this.form.submit()" class="rounded-lg border-gray-300 text-sm focus:ring-blue-500 focus:border-blue-500 w-full bg-white">
-                        <option value="">Semua Kategori</option>
-                        <option value="pangan" {{ request('kategori') === 'pangan' ? 'selected' : '' }}>🍱 Pangan / Makanan</option>
-                        <option value="pakaian" {{ request('kategori') === 'pakaian' ? 'selected' : '' }}>👗 Pakaian / Sandang</option>
-                        <option value="kerajinan" {{ request('kategori') === 'kerajinan' ? 'selected' : '' }}>🧶 Kerajinan</option>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">KBLI / Jenis Usaha</label>
+                    <select name="kbli" onchange="this.form.submit()" class="rounded-lg border-gray-300 text-sm focus:ring-blue-500 focus:border-blue-500 w-full bg-white">
+                        <option value="">Semua KBLI</option>
+                        @foreach(($daftarKbli ?? collect()) as $item)
+                            @php
+                                $val = $item->kode_kbli ?: $item->jenis_usaha;
+                                $label = $item->kode_kbli ? ($item->kode_kbli . ' : ' . $item->jenis_usaha) : $item->jenis_usaha;
+                            @endphp
+                            <option value="{{ $val }}" {{ request('kbli') == $val ? 'selected' : '' }}>
+                                {{ $label }}
+                            </option>
+                        @endforeach
                     </select>
                 </div>
                 <div>
@@ -145,7 +151,7 @@
                         </svg>
                         Terapkan Filter
                     </button>
-                    @if(request()->hasAny(['kecamatan', 'kelurahan_id', 'kategori', 'status']))
+                    @if(request()->hasAny(['kecamatan', 'kelurahan_id', 'kbli', 'status']))
                         <a href="{{ route('industri.data-ikm') }}"
                            class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-red-500 transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -177,6 +183,7 @@
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Nama Usaha</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Pemilik</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Kelurahan</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">No KBLI</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Jenis Usaha</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
                         </tr>
@@ -198,6 +205,15 @@
                                     {{ $ikm->kelurahan?->nama_kelurahan ?? '—' }}
                                     @if($ikm->kelurahan?->kecamatan)
                                         <span class="block text-[10px] text-slate-400">{{ $ikm->kelurahan->kecamatan }}</span>
+                                    @endif
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    @if($ikm->kode_kbli)
+                                        <span class="px-2.5 py-1 text-xs font-mono font-semibold bg-slate-100 text-slate-700 rounded-md border border-slate-200">
+                                            {{ $ikm->kode_kbli }}
+                                        </span>
+                                    @else
+                                        <span class="text-gray-400 text-xs">-</span>
                                     @endif
                                 </td>
                                 <td class="px-5 py-3.5 text-slate-500 text-xs max-w-[180px]">

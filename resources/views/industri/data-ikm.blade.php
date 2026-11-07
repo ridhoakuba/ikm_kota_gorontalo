@@ -1,5 +1,21 @@
 <x-industri-layout activeModule="data-ikm" pageTitle="Data IKM" breadcrumb="Impor & Master Data IKM Seluruh Kelurahan">
 
+<div x-data="ikmPage">
+
+    {{-- ===== AKSI UTAMA: TAMBAH IKM MANUAL ===== --}}
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+        <p class="text-sm text-slate-500">
+            Kelola Master Data IKM: impor massal dari Excel (PTSP) atau tambahkan satu data usaha secara manual.
+        </p>
+        <button type="button" id="btn-tambah-ikm-manual" @click="tambahOpen = true"
+                class="inline-flex items-center justify-center gap-2 bg-emerald-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-emerald-700 active:scale-95 transition-all duration-150 shadow-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+            </svg>
+            Tambah IKM Manual
+        </button>
+    </div>
+
     {{-- ===== UPLOAD EXCEL ===== --}}
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
         <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
@@ -12,7 +28,7 @@
                 <h3 class="text-sm font-bold text-slate-800">Import Data IKM dari Excel (PTSP)</h3>
                 <p class="text-xs text-slate-400 mt-0.5">
                     Kolom yang diperlukan:
-                    <code class="font-mono text-blue-600 bg-blue-50 px-1 py-0.5 rounded text-[11px]">nib, nama_proyek, nama_perusahaan, alamat_usaha, kelurahan_usaha, judul_kbli</code>
+                    <code class="font-mono text-blue-600 bg-blue-50 px-1 py-0.5 rounded text-[11px]">nib, nama_proyek, nama_perusahaan, alamat_usaha, kelurahan_usaha, kbli, judul_kbli</code>
                 </p>
             </div>
         </div>
@@ -79,15 +95,7 @@
     </div>
 
     {{-- ===== FILTER + TABEL MASTER IKM ===== --}}
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"
-         x-data="{
-             modalBuktiOpen: false,
-             selectedIkm: null,
-             openBukti(ikm) {
-                 this.selectedIkm = ikm;
-                 this.modalBuktiOpen = true;
-             }
-         }">
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
         {{-- Header + Filter --}}
         <div class="px-6 py-4 border-b border-slate-100">
@@ -131,12 +139,18 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Kategori Usaha</label>
-                    <select name="kategori" onchange="this.form.submit()" class="rounded-lg border-gray-300 text-sm focus:ring-blue-500 focus:border-blue-500 w-full bg-white">
-                        <option value="">Semua Kategori</option>
-                        <option value="pangan" {{ request('kategori') === 'pangan' ? 'selected' : '' }}>🍱 Pangan / Makanan</option>
-                        <option value="pakaian" {{ request('kategori') === 'pakaian' ? 'selected' : '' }}>👗 Pakaian / Sandang</option>
-                        <option value="kerajinan" {{ request('kategori') === 'kerajinan' ? 'selected' : '' }}>🧶 Kerajinan</option>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">KBLI / Jenis Usaha</label>
+                    <select name="kbli" onchange="this.form.submit()" class="rounded-lg border-gray-300 text-sm focus:ring-blue-500 focus:border-blue-500 w-full bg-white">
+                        <option value="">Semua KBLI</option>
+                        @foreach($daftarKbli as $item)
+                            @php
+                                $val = $item->kode_kbli ?: $item->jenis_usaha;
+                                $label = $item->kode_kbli ? ($item->kode_kbli . ' : ' . $item->jenis_usaha) : $item->jenis_usaha;
+                            @endphp
+                            <option value="{{ $val }}" {{ request('kbli') == $val ? 'selected' : '' }}>
+                                {{ $label }}
+                            </option>
+                        @endforeach
                     </select>
                 </div>
                 <div>
@@ -156,7 +170,7 @@
                         </svg>
                         Terapkan Filter
                     </button>
-                    @if(request()->hasAny(['kecamatan', 'kelurahan_id', 'kategori', 'status']))
+                    @if(request()->hasAny(['kecamatan', 'kelurahan_id', 'kbli', 'status']))
                         <a href="{{ route('industri.data-ikm') }}"
                            class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-red-500 transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -180,7 +194,7 @@
             </div>
         @else
             <div class="overflow-x-auto">
-                <table class="w-full text-sm min-w-[850px]">
+                <table class="w-full text-sm min-w-[950px]">
                     <thead>
                         <tr class="bg-slate-50 border-b border-slate-100">
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider w-10">#</th>
@@ -188,9 +202,10 @@
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Nama Usaha</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Pemilik</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Kelurahan</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">No KBLI</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Jenis Usaha</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-                            <th class="px-5 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">Bukti</th>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">Bukti / Aksi</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-50">
@@ -212,7 +227,16 @@
                                         <span class="block text-[10px] text-slate-400">{{ $ikm->kelurahan->kecamatan }}</span>
                                     @endif
                                 </td>
-                                <td class="px-5 py-3.5 text-slate-500 text-xs max-w-[180px]">
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    @if($ikm->kode_kbli)
+                                        <span class="px-2.5 py-1 text-xs font-mono font-semibold bg-slate-100 text-slate-700 rounded-md border border-slate-200">
+                                            {{ $ikm->kode_kbli }}
+                                        </span>
+                                    @else
+                                        <span class="text-gray-400 text-xs">-</span>
+                                    @endif
+                                </td>
+                                <td class="px-5 py-3.5 text-slate-500 text-xs max-w-[200px]">
                                     <span class="line-clamp-2">{{ $ikm->jenis_usaha ?: '—' }}</span>
                                 </td>
                                 <td class="px-5 py-3.5 whitespace-nowrap">
@@ -229,8 +253,18 @@
                                             <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Menunggu
                                         </span>
                                     @endif
+                                    @if ($ikm->updated_by_role === 'industri')
+                                        <span class="block text-[10px] text-blue-500 font-medium mt-1" title="Diperbarui langsung oleh Bidang Industri">
+                                            ✎ Oleh Bidang Industri
+                                        </span>
+                                    @elseif ($ikm->updated_by_role === 'kelurahan')
+                                        <span class="block text-[10px] text-slate-400 mt-1" title="Diperbarui oleh Petugas Kelurahan">
+                                            ✎ Oleh Kelurahan
+                                        </span>
+                                    @endif
                                 </td>
                                 <td class="px-5 py-3.5 text-center whitespace-nowrap">
+                                    <div class="flex items-center justify-center gap-1.5">
                                     @if ($ikm->data_verifikasi)
                                         <button type="button" @click="openBukti({{ json_encode($ikm) }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 active:scale-95 transition shadow-sm"
@@ -241,9 +275,16 @@
                                             </svg>
                                             Bukti
                                         </button>
-                                    @else
-                                        <span class="text-xs text-slate-300">—</span>
                                     @endif
+                                        <button type="button" @click="openEdit({{ json_encode($ikm) }})"
+                                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:scale-95 transition shadow-sm"
+                                                title="Detail / Edit Verifikasi & Legalitas">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                            </svg>
+                                            Detail / Edit Verifikasi
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         @endforeach
@@ -444,5 +485,118 @@
             </div>
         </div>
     </div>
+
+    {{-- ===== MODAL TAMBAH IKM MANUAL & MODAL DETAIL / EDIT VERIFIKASI ===== --}}
+    @include('industri.partials.modal-tambah-ikm')
+    @include('industri.partials.modal-edit-verifikasi')
+
+</div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('ikmPage', () => ({
+            // ===== Modal Bukti (read-only) =====
+            modalBuktiOpen: false,
+            selectedIkm: null,
+            openBukti(ikm) {
+                this.selectedIkm = ikm;
+                this.modalBuktiOpen = true;
+            },
+
+            // ===== Modal Tambah IKM Manual =====
+            tambahOpen: {{ old('_form') === 'tambah-manual' ? 'true' : 'false' }},
+            kelurahans: @js($kelurahans->map(fn ($k) => ['id' => $k->id, 'nama' => $k->nama_kelurahan, 'kecamatan' => $k->kecamatan])->values()),
+            daftarKbli: @js($daftarKbli->map(fn ($k) => ['kode' => $k->kode_kbli ?? '', 'judul' => $k->jenis_usaha])->values()),
+            tambah: {
+                kecamatan: @js(old('_form') === 'tambah-manual' ? old('kecamatan', '') : ''),
+                kelurahan_id: @js(old('_form') === 'tambah-manual' ? (string) old('kelurahan_id', '') : ''),
+                kode_kbli: @js(old('_form') === 'tambah-manual' ? old('kode_kbli', '') : ''),
+                jenis_usaha: @js(old('_form') === 'tambah-manual' ? old('jenis_usaha', old('judul_kbli', '')) : ''),
+            },
+            get kelurahanOptions() {
+                if (!this.tambah.kecamatan) return this.kelurahans;
+                return this.kelurahans.filter(k => k.kecamatan === this.tambah.kecamatan);
+            },
+            onKecamatanChange() {
+                if (!this.kelurahanOptions.some(k => String(k.id) === String(this.tambah.kelurahan_id))) {
+                    this.tambah.kelurahan_id = '';
+                }
+            },
+            onSelectKbliPreset(idx) {
+                if (idx === '' || !this.daftarKbli[idx]) return;
+                this.tambah.kode_kbli = this.daftarKbli[idx].kode || '';
+                this.tambah.jenis_usaha = this.daftarKbli[idx].judul || '';
+            },
+
+            // ===== Modal Detail / Edit Verifikasi (Bidang Industri) =====
+            editOpen: false,
+            activeIkm: null,
+            formAction: '',
+            selectedStatus: 'menunggu',
+            catatanPetugas: '',
+            editKbli: { kode_kbli: '', jenis_usaha: '' },
+            legalitas: { sertifikat_halal: '', izin_bpom: '', pirt: '' },
+            answers: {},
+            geoLoading: false,
+
+            openEdit(ikm) {
+                this.activeIkm = ikm;
+                this.formAction = '{{ url('/ikm') }}/' + ikm.id + '/status';
+                this.selectedStatus = ikm.status_verifikasi || 'menunggu';
+                this.catatanPetugas = ikm.catatan_petugas || '';
+                this.editKbli = {
+                    kode_kbli: ikm.kode_kbli || '',
+                    jenis_usaha: ikm.jenis_usaha || '',
+                };
+                this.legalitas = {
+                    sertifikat_halal: ikm.sertifikat_halal || '',
+                    izin_bpom: ikm.izin_bpom || '',
+                    pirt: ikm.pirt || '',
+                };
+
+                let rawData = ikm.data_verifikasi;
+                this.answers = {};
+                if (typeof rawData === 'string') {
+                    try { rawData = JSON.parse(rawData); } catch (e) {}
+                }
+                if (rawData && typeof rawData === 'object') {
+                    for (let k in rawData) {
+                        if (rawData[k] && typeof rawData[k] === 'object' && 'nilai' in rawData[k]) {
+                            this.answers[k] = rawData[k].nilai;
+                        } else {
+                            this.answers[k] = rawData[k];
+                        }
+                    }
+                }
+
+                this.editOpen = true;
+            },
+
+            getGPSLocation(slug) {
+                if (!navigator.geolocation) {
+                    alert('Fitur GPS tidak didukung oleh browser Anda.');
+                    return;
+                }
+                this.geoLoading = true;
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        this.answers[slug] = pos.coords.latitude.toFixed(6) + ', ' + pos.coords.longitude.toFixed(6);
+                        this.geoLoading = false;
+                    },
+                    (err) => {
+                        this.geoLoading = false;
+                        let msg = 'Gagal mendeteksi lokasi GPS: ';
+                        if (err.code === 1) msg += 'Izin akses lokasi ditolak oleh pengguna.';
+                        else if (err.code === 2) msg += 'Titik lokasi tidak tersedia.';
+                        else if (err.code === 3) msg += 'Waktu permintaan habis.';
+                        else msg += err.message;
+                        alert(msg);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            },
+        }));
+    });
+</script>
 
 </x-industri-layout>

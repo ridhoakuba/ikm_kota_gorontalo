@@ -26,7 +26,7 @@ class IkmController extends Controller
      * Tampilkan dasbor yang sesuai dengan role user yang sedang login.
      * Role industri → redirect ke Beranda modul industri.
      */
-    public function dashboard(): View|RedirectResponse
+    public function dashboard(Request $request): View|RedirectResponse
     {
         $user = auth()->user();
 
@@ -35,14 +35,29 @@ class IkmController extends Controller
         }
 
         if ($user->role === 'kelurahan') {
-            $dataIkms = DataIkm::with(['kelurahan', 'verifiedBy'])
+            $query = DataIkm::with(['kelurahan', 'verifiedBy'])
                 ->where('kelurahan_id', $user->kelurahan_id)
-                ->latest()
-                ->get();
+                ->latest();
+
+            if ($request->filled('kbli')) {
+                $kbli = $request->kbli;
+                $query->where(function ($q) use ($kbli) {
+                    $q->where('kode_kbli', 'like', $kbli . '%')
+                      ->orWhere('jenis_usaha', $kbli);
+                });
+            }
+
+            if ($request->filled('status')) {
+                $query->where('status_verifikasi', $request->status);
+            }
+
+            $dataIkms = $query->get();
+
+            $daftarKbli = $this->buildDaftarKbliQuery($user->kelurahan_id);
 
             $instrumens = FormVerifikasi::aktif()->get();
 
-            return view('dashboard.kelurahan', compact('dataIkms', 'instrumens'));
+            return view('dashboard.kelurahan', compact('dataIkms', 'instrumens', 'daftarKbli'));
         }
 
         return redirect('/')->with('error', 'Role tidak dikenali.');
@@ -144,25 +159,24 @@ class IkmController extends Controller
             $query->where('status_verifikasi', $request->status);
         }
 
-        // Filter: Kategori Bidang Usaha (berdasarkan keyword jenis_usaha / nama_usaha)
-        if ($request->filled('kategori')) {
-            $keywords = match ($request->kategori) {
-                'pangan'    => ['pangan', 'makanan', 'minuman', 'kuliner', 'kue', 'roti', 'mie', 'tempe', 'tahu', 'snack', 'katering', 'restoran'],
-                'pakaian'   => ['pakaian', 'baju', 'konveksi', 'jahit', 'tekstil', 'sandang', 'busana', 'garmen'],
-                'kerajinan' => ['kerajinan', 'anyaman', 'ukiran', 'batik', 'tenun', 'souvenir', 'furnitur', 'kayu', 'bambu', 'rotan'],
-                default     => [],
-            };
-            if (!empty($keywords)) {
-                $query->where(function ($q) use ($keywords) {
-                    foreach ($keywords as $kw) {
-                        $q->orWhere('jenis_usaha', 'like', "%{$kw}%")
-                          ->orWhere('nama_usaha', 'like', "%{$kw}%");
-                    }
-                });
-            }
+        // Filter: Legalitas (Halal & BPOM)
+        if ($request->filled('legalitas')) {
+            $query->filterLegalitas($request->legalitas);
+        }
+
+        // Filter: KBLI (Kode KBLI atau Judul KBLI / Jenis Usaha)
+        if ($request->filled('kbli')) {
+            $kbli = $request->kbli;
+            $query->where(function ($q) use ($kbli) {
+                $q->where('kode_kbli', 'like', $kbli . '%')
+                  ->orWhere('jenis_usaha', $kbli);
+            });
         }
 
         $dataIkms = $query->paginate(25)->withQueryString();
+
+        // Daftar unik KBLI berdasarkan kode_kbli (tanpa duplikasi nomor KBLI)
+        $daftarKbli = $this->buildDaftarKbliQuery();
 
         // Data untuk dropdown filter kecamatan (unik dari kelurahan)
         $kecamatans = Kelurahan::whereNotNull('kecamatan')
@@ -181,7 +195,100 @@ class IkmController extends Controller
 
         $kelurahans = Kelurahan::orderBy('nama_kelurahan')->get();
 
-        return view('industri.data-ikm', compact('dataIkms', 'kecamatans', 'kelurahans'));
+        // Instrumen dinamis untuk modal Detail / Edit Verifikasi (sama dengan milik Kelurahan)
+        if (FormVerifikasi::count() === 0) {
+            FormVerifikasi::seedDefaults();
+        }
+        $instrumens = FormVerifikasi::aktif()->get();
+
+        return view('industri.data-ikm', compact('dataIkms', 'kecamatans', 'kelurahans', 'instrumens', 'daftarKbli'));
+    }
+
+    /**
+     * Tambah data IKM secara manual (tanpa import Excel).
+     * Hanya dapat diakses oleh role 'industri'.
+     */
+    public function storeManual(Request $request): RedirectResponse
+    {
+        $this->authorizeIndustri();
+
+        // Dukungan alias judul_kbli -> jenis_usaha agar konsisten dengan struktur Excel
+        if (!$request->filled('jenis_usaha') && $request->filled('judul_kbli')) {
+            $request->merge(['jenis_usaha' => $request->input('judul_kbli')]);
+        }
+
+        $validated = $request->validate([
+            'nib'               => ['required', 'string', 'max:50', 'unique:data_ikms,nib'],
+            'nama_usaha'        => ['required', 'string', 'max:255'],
+            'nama_pemilik'      => ['required', 'string', 'max:255'],
+            'alamat'            => ['required', 'string', 'max:1000'],
+            'kecamatan'         => ['nullable', 'string', 'max:255'],
+            'kelurahan_id'      => ['required', 'integer', 'exists:kelurahans,id'],
+            'kode_kbli'         => ['nullable', 'string', 'max:20'],
+            'jenis_usaha'       => ['required', 'string', 'max:255'],
+            'status_verifikasi' => ['nullable', 'in:' . implode(',', [
+                DataIkm::STATUS_MENUNGGU,
+                DataIkm::STATUS_DITEMUKAN,
+                DataIkm::STATUS_TIDAK_DITEMUKAN,
+            ])],
+        ], [
+            'nib.required'          => 'NIB wajib diisi.',
+            'nib.unique'            => 'NIB tersebut sudah terdaftar di Master Data IKM.',
+            'nama_usaha.required'   => 'Nama usaha wajib diisi.',
+            'nama_pemilik.required' => 'Nama pemilik wajib diisi.',
+            'alamat.required'       => 'Alamat usaha wajib diisi.',
+            'kelurahan_id.required' => 'Silakan pilih kelurahan.',
+            'kelurahan_id.exists'   => 'Kelurahan yang dipilih tidak valid.',
+            'jenis_usaha.required'  => 'Judul KBLI / Jenis usaha wajib diisi.',
+        ]);
+
+        $kelurahan = Kelurahan::findOrFail($validated['kelurahan_id']);
+        if (!empty($validated['kecamatan']) && $kelurahan->kecamatan && $kelurahan->kecamatan !== $validated['kecamatan']) {
+            return back()
+                ->withInput()
+                ->withErrors(['kelurahan_id' => 'Kelurahan yang dipilih bukan bagian dari kecamatan tersebut.']);
+        }
+
+        $kodeKbli  = isset($validated['kode_kbli']) && trim($validated['kode_kbli']) !== '' ? trim($validated['kode_kbli']) : null;
+        $judulKbli = trim($validated['jenis_usaha']);
+
+        // Jika judul_kbli diketik tergabung "10710 : Judul" atau "10710 - Judul", pisahkan secara rapi
+        if (preg_match('/^(\d{4,5}[a-zA-Z0-9]*)\s*[-:]\s*(.+)$/u', $judulKbli, $matches)) {
+            if ($kodeKbli === null) {
+                $kodeKbli = trim($matches[1]);
+            }
+            $judulKbli = trim($matches[2]);
+        }
+
+        $kodeKbli = IkmImport::sanitizeKodeKbli($kodeKbli, $judulKbli);
+
+        $status = $validated['status_verifikasi'] ?? DataIkm::STATUS_MENUNGGU;
+
+        $dataIkm = [
+            'nib'               => trim($validated['nib']),
+            'kelurahan_id'      => $kelurahan->id,
+            'nama_usaha'        => trim($validated['nama_usaha']),
+            'nama_pemilik'      => trim($validated['nama_pemilik']),
+            'alamat'            => trim($validated['alamat']),
+            'kode_kbli'         => $kodeKbli,
+            'jenis_usaha'       => $judulKbli,
+            'status_verifikasi' => $status,
+            'updated_by_role'   => DataIkm::UPDATED_BY_INDUSTRI,
+        ];
+
+        // Jika status awal sudah final, catat sebagai verifikasi langsung oleh Bidang Industri
+        if ($status !== DataIkm::STATUS_MENUNGGU) {
+            $dataIkm += [
+                'verified_at'      => now(),
+                'verified_by'      => auth()->id(),
+                'last_verified_by' => auth()->id(),
+            ];
+        }
+
+        DataIkm::create($dataIkm);
+
+        return redirect()->route('industri.data-ikm')
+            ->with('success', "Data IKM \"{$dataIkm['nama_usaha']}\" berhasil ditambahkan secara manual.");
     }
 
     /**
@@ -394,10 +501,20 @@ class IkmController extends Controller
      */
     public function updateStatus(Request $request, DataIkm $dataIkm): RedirectResponse
     {
+        $user       = auth()->user();
+        $isIndustri = $user->role === 'industri';
+
         // Validasi hak akses kelurahan
-        if (auth()->user()->role === 'kelurahan' && $dataIkm->kelurahan_id !== auth()->user()->kelurahan_id) {
+        if ($user->role === 'kelurahan' && $dataIkm->kelurahan_id !== $user->kelurahan_id) {
             abort(403, 'Anda tidak memiliki akses untuk memverifikasi data di luar kelurahan Anda.');
         }
+
+        // Hanya Kelurahan & Admin Industri yang boleh memperbarui verifikasi
+        if (!in_array($user->role, ['kelurahan', 'industri'], true)) {
+            abort(403, 'Anda tidak memiliki akses untuk memperbarui verifikasi.');
+        }
+
+        $updatedByRole = $isIndustri ? DataIkm::UPDATED_BY_INDUSTRI : DataIkm::UPDATED_BY_KELURAHAN;
 
         $request->validate([
             'status_verifikasi' => [
@@ -408,17 +525,44 @@ class IkmController extends Controller
                     DataIkm::STATUS_TIDAK_DITEMUKAN,
                 ]),
             ],
-            'catatan_petugas' => ['nullable', 'string', 'max:1000'],
+            'catatan_petugas'  => ['nullable', 'string', 'max:1000'],
+            'kode_kbli'        => ['nullable', 'string', 'max:20'],
+            'jenis_usaha'      => ['nullable', 'string', 'max:255'],
+            'sertifikat_halal' => ['nullable', 'string', 'max:100'],
+            'izin_bpom'        => ['nullable', 'string', 'max:100'],
+            'pirt'             => ['nullable', 'string', 'max:100'],
         ]);
 
-        // 1. Jika aksi reset kembali ke status 'menunggu'
-        if ($request->status_verifikasi === DataIkm::STATUS_MENUNGGU) {
+        // Legalitas (Halal / BPOM / PIRT) & KBLI hanya dapat diubah oleh Bidang Industri
+        $legalitas = $isIndustri
+            ? [
+                'sertifikat_halal' => $request->filled('sertifikat_halal') ? trim($request->sertifikat_halal) : null,
+                'izin_bpom'        => $request->filled('izin_bpom') ? trim($request->izin_bpom) : null,
+                'pirt'             => $request->filled('pirt') ? trim($request->pirt) : null,
+            ]
+            : [];
+
+        if ($isIndustri && $request->has('kode_kbli')) {
+            $legalitas['kode_kbli'] = IkmImport::sanitizeKodeKbli(
+                $request->input('kode_kbli'),
+                $request->input('jenis_usaha', $dataIkm->jenis_usaha)
+            );
+        }
+        if ($isIndustri && $request->filled('jenis_usaha')) {
+            $legalitas['jenis_usaha'] = trim($request->jenis_usaha);
+        }
+
+        // 1. Jika aksi reset kembali ke status 'menunggu' (khusus alur Kelurahan;
+        //    Admin Industri menyimpan perubahan tanpa menghapus data yang sudah ada)
+        if ($request->status_verifikasi === DataIkm::STATUS_MENUNGGU && !$isIndustri) {
             $dataIkm->update([
                 'status_verifikasi' => DataIkm::STATUS_MENUNGGU,
                 'catatan_petugas'   => null,
                 'data_verifikasi'   => null,
                 'verified_at'       => null,
                 'verified_by'       => null,
+                'updated_by_role'   => $updatedByRole,
+                'last_verified_by'  => $user->id,
             ]);
 
             return redirect()->back()
@@ -432,7 +576,8 @@ class IkmController extends Controller
         $instrumens = FormVerifikasi::aktif()->get();
         $jawabanInput = $request->input('jawaban', []);
         $existingData = is_array($dataIkm->data_verifikasi) ? $dataIkm->data_verifikasi : [];
-        $dataVerifikasi = [];
+        // Admin Industri memperbarui langsung: pertahankan data lama & tidak mewajibkan instrumen lapangan
+        $dataVerifikasi = $isIndustri ? $existingData : [];
         $missingRequired = [];
 
         foreach ($instrumens as $item) {
@@ -451,13 +596,13 @@ class IkmController extends Controller
                     $nilai = is_array($prev) ? ($prev['nilai'] ?? null) : $prev;
                 }
 
-                if ($item->is_required && empty($nilai)) {
+                if (!$isIndustri && $item->is_required && empty($nilai)) {
                     $missingRequired[] = "Instrumen \"{$item->nama_instrumen}\" wajib diunggah.";
                 }
             } else {
                 $nilai = $jawabanInput[$slug] ?? null;
 
-                if ($item->is_required && (is_null($nilai) || trim((string)$nilai) === '')) {
+                if (!$isIndustri && $item->is_required && (is_null($nilai) || trim((string)$nilai) === '')) {
                     $missingRequired[] = "Instrumen \"{$item->nama_instrumen}\" wajib diisi.";
                 }
             }
@@ -469,25 +614,41 @@ class IkmController extends Controller
             ];
         }
 
+        // Untuk Admin Industri, buang instrumen kosong agar tidak tampil sebagai "bukti"
+        if ($isIndustri) {
+            $dataVerifikasi = array_filter($dataVerifikasi, function ($v) {
+                $nilai = is_array($v) ? ($v['nilai'] ?? null) : $v;
+                return !(is_null($nilai) || trim((string) $nilai) === '');
+            });
+        }
+
         if (!empty($missingRequired)) {
             return redirect()->back()
                 ->withInput()
                 ->with('error', implode(' ', $missingRequired));
         }
 
-        // 3. Simpan data verifikasi, status, tanggal & verifikator
+        // 3. Simpan data verifikasi, legalitas, status, tanggal, verifikator & riwayat audit
         $dataIkm->update([
             'status_verifikasi' => $request->status_verifikasi,
             'catatan_petugas'   => $request->catatan_petugas,
-            'data_verifikasi'   => $dataVerifikasi,
+            'data_verifikasi'   => empty($dataVerifikasi) ? null : $dataVerifikasi,
             'verified_at'       => now(),
-            'verified_by'       => auth()->id(),
-        ]);
+            'verified_by'       => $user->id,
+            'updated_by_role'   => $updatedByRole,
+            'last_verified_by'  => $user->id,
+        ] + $legalitas);
 
-        $label = $request->status_verifikasi === DataIkm::STATUS_DITEMUKAN ? 'Ditemukan / Aktif' : 'Tidak Ditemukan / Tutup';
+        $label = match ($request->status_verifikasi) {
+            DataIkm::STATUS_DITEMUKAN => 'Ditemukan / Aktif',
+            DataIkm::STATUS_MENUNGGU  => 'Menunggu Verifikasi',
+            default                   => 'Tidak Ditemukan / Tutup',
+        };
+
+        $oleh = $isIndustri ? 'oleh Bidang Industri' : 'lapangan';
 
         return redirect()->back()
-            ->with('success', "Hasil verifikasi lapangan IKM \"{$dataIkm->nama_usaha}\" berhasil disimpan ({$label}).");
+            ->with('success', "Hasil verifikasi {$oleh} IKM \"{$dataIkm->nama_usaha}\" berhasil disimpan ({$label}).");
     }
 
     /**
@@ -528,5 +689,33 @@ class IkmController extends Controller
         if (auth()->user()->role !== 'industri') {
             abort(403, 'Halaman ini hanya dapat diakses oleh Admin Industri.');
         }
+    }
+
+    /**
+     * Ambil daftar unik KBLI untuk dropdown filter:
+     * - Dikelompokkan unik berdasarkan kode_kbli (satu judul representatif via MAX(jenis_usaha)).
+     * - Menyertakan entri yang belum memiliki kode_kbli jika jenis_usaha-nya belum terwakili.
+     */
+    private function buildDaftarKbliQuery(?int $kelurahanId = null): \Illuminate\Support\Collection
+    {
+        $byKode = DataIkm::selectRaw('kode_kbli, MAX(jenis_usaha) as jenis_usaha')
+            ->when($kelurahanId, fn ($q) => $q->where('kelurahan_id', $kelurahanId))
+            ->whereNotNull('kode_kbli')
+            ->where('kode_kbli', '!=', '')
+            ->groupBy('kode_kbli')
+            ->orderBy('kode_kbli')
+            ->get();
+
+        $tanpaKode = DataIkm::selectRaw('NULL as kode_kbli, jenis_usaha')
+            ->when($kelurahanId, fn ($q) => $q->where('kelurahan_id', $kelurahanId))
+            ->where(fn ($q) => $q->whereNull('kode_kbli')->orWhere('kode_kbli', ''))
+            ->whereNotNull('jenis_usaha')
+            ->where('jenis_usaha', '!=', '')
+            ->when($byKode->isNotEmpty(), fn ($q) => $q->whereNotIn('jenis_usaha', $byKode->pluck('jenis_usaha')))
+            ->groupBy('jenis_usaha')
+            ->orderBy('jenis_usaha')
+            ->get();
+
+        return $byKode->concat($tanpaKode)->values();
     }
 }
